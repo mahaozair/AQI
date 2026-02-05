@@ -21,93 +21,109 @@ from config import (
 
 
 def fetch_open_meteo_data(start_date, end_date):
-    """
-    Fetch weather and air quality data from Open-Meteo API (Free)
-    Only fetches fields that match your existing Feature Group schema
-    """
     print("\n" + "="*70)
     print("FETCHING DATA FROM OPEN-METEO API")
     print("="*70)
     print(f"Location: Karachi ({LATITUDE}, {LONGITUDE})")
-    print(f"Date range: {start_date} to {end_date}")
+    print(f"Requested Date range: {start_date} to {end_date}")
+
+    # -------------------------------
+    # Cap end_date to last completed hour
+    # -------------------------------
+    today = datetime.now()
+    yesterday = today - timedelta(days=1)
+    # ensure both are datetime
+    if isinstance(end_date, datetime):
+        end_dt = end_date
+    else:
+        end_dt = datetime.combine(end_date, datetime.min.time())
+
+    if end_dt > yesterday:
+        end_date = yesterday
     
     # Format dates for API
     start_str = start_date.strftime('%Y-%m-%d')
     end_str = end_date.strftime('%Y-%m-%d')
-    
-    # Open-Meteo API endpoints
+
+    start_str = start_date.strftime('%Y-%m-%d')
+    end_str = end_date.strftime('%Y-%m-%d')
+
+    # API endpoints
     weather_url = "https://archive-api.open-meteo.com/v1/archive"
     air_quality_url = "https://air-quality-api.open-meteo.com/v1/air-quality"
-    
-    # Weather parameters - ONLY what you need
+
+    # Only the features that exist in your Feature Group
     weather_params = {
         'latitude': LATITUDE,
         'longitude': LONGITUDE,
         'start_date': start_str,
         'end_date': end_str,
-        'hourly': [
-            'temperature_2m',
-            'relative_humidity_2m',
-            'windspeed_10m'
-        ],
+        'hourly': ','.join(['temperature_2m', 'relative_humidity_2m', 'windspeed_10m']),
         'timezone': TIMEZONE
     }
-    
-    # Air quality parameters - ONLY what you need
+
     air_params = {
         'latitude': LATITUDE,
         'longitude': LONGITUDE,
         'start_date': start_str,
         'end_date': end_str,
-        'hourly': [
-            'pm10',
-            'pm2_5'
-        ],
+        'hourly': ','.join(['pm10', 'pm2_5']),
         'timezone': TIMEZONE
     }
-    
+
+
     try:
-        # Fetch weather data
+        # -------------------------------
+        # Fetch weather
+        # -------------------------------
         print("\nFetching weather data...")
-        weather_response = requests.get(weather_url, params=weather_params, timeout=30)
-        weather_response.raise_for_status()
-        weather_data = weather_response.json()
-        
-        # Fetch air quality data
+        weather_resp = requests.get(weather_url, params=weather_params, timeout=30)
+        weather_resp.raise_for_status()
+        weather_json = weather_resp.json()
+
+        # -------------------------------
+        # Fetch air quality
+        # -------------------------------
         print("Fetching air quality data...")
-        air_response = requests.get(air_quality_url, params=air_params, timeout=30)
-        air_response.raise_for_status()
-        air_data = air_response.json()
-        
-        # Create DataFrames - ONLY fields that exist in your schema
+        air_resp = requests.get(air_quality_url, params=air_params, timeout=30)
+        air_resp.raise_for_status()
+        air_json = air_resp.json()
+
+        # -------------------------------
+        # Build DataFrames
+        # -------------------------------
         weather_df = pd.DataFrame({
-            'datetime': pd.to_datetime(weather_data['hourly']['time']),
-            'temperature_2m': weather_data['hourly']['temperature_2m'],
-            'relative_humidity_2m': weather_data['hourly']['relative_humidity_2m'],
-            'windspeed_10m': weather_data['hourly']['windspeed_10m']
+            'datetime': pd.to_datetime(weather_json['hourly']['time']),
+            'temperature_2m': weather_json['hourly']['temperature_2m'],
+            'relative_humidity_2m': weather_json['hourly']['relative_humidity_2m'],
+            'windspeed_10m': weather_json['hourly']['windspeed_10m']
         })
-        
+
         air_df = pd.DataFrame({
-            'datetime': pd.to_datetime(air_data['hourly']['time']),
-            'pm10': air_data['hourly']['pm10'],
-            'pm2_5': air_data['hourly']['pm2_5']
+            'datetime': pd.to_datetime(air_json['hourly']['time']),
+            'pm10': air_json['hourly']['pm10'],
+            'pm2_5': air_json['hourly']['pm2_5']
         })
-        
-        # Merge datasets
+
+        # -------------------------------
+        # Merge on datetime
+        # -------------------------------
         df = pd.merge(weather_df, air_df, on='datetime', how='inner')
-        
+
         print(f"✅ Successfully fetched {len(df)} hourly records")
         print(f"   Date range: {df['datetime'].min()} to {df['datetime'].max()}")
         print(f"   Columns: {list(df.columns)}")
-        
+
         return df
-        
+
     except requests.exceptions.RequestException as e:
-        print(f"❌ Error fetching data: {e}")
+        print(f"❌ Error fetching data from Open-Meteo: {e}")
         raise
     except KeyError as e:
         print(f"❌ Error parsing API response: {e}")
         raise
+
+
 
 
 def compute_features(df):
@@ -157,9 +173,10 @@ def connect_to_hopsworks():
     
     project = hopsworks.login(
         project=HOPSWORKS_PROJECT_NAME,
-        api_key_value=HOPSWORKS_API_KEY,host="eu-west.cloud.hopsworks.ai",
-    port=443,
-    engine="python"
+        api_key_value=HOPSWORKS_API_KEY,
+        host="eu-west.cloud.hopsworks.ai",
+        port=443,
+        engine="python"
     )
     
     print(f"✅ Connected to project: {HOPSWORKS_PROJECT_NAME}")
@@ -186,7 +203,8 @@ def save_to_feature_store(df, project, mode='append'):
     print(f"Removed {initial_rows - len(df_to_save)} rows with NaN target")
     
     # Create 'time' and 'time_key' columns to match YOUR schema
-    df_to_save['time'] = df_to_save['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    df_to_save['time'] = df_to_save['datetime']  # keep as datetime
+    
     df_to_save['time_key'] = df_to_save['datetime'].dt.strftime('%Y%m%d%H')
     
     # CRITICAL: Only keep features that exist in your existing Feature Group

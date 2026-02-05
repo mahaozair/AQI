@@ -9,6 +9,7 @@ lightgbm>=4.0.0
 
 # Feature Store & MLOps
 hopsworks>=3.4.0
+confluent-kafka>=2.1.0
 
 # API and Data Fetching
 requests>=2.31.0
