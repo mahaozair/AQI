@@ -192,7 +192,10 @@ def connect_to_hopsworks():
     
     project = hopsworks.login(
         project=HOPSWORKS_PROJECT_NAME,
-        api_key_value=HOPSWORKS_API_KEY
+        api_key_value=HOPSWORKS_API_KEY,
+            host="eu-west.cloud.hopsworks.ai",
+            port=443,
+            engine="python" 
     )
     
     print(f"✅ Connected to project: {HOPSWORKS_PROJECT_NAME}")
