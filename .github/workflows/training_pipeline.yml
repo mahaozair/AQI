@@ -34,9 +34,10 @@ jobs:
     
     - name: Run training pipeline
       env:
-        HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT_NAME: ${{ secrets.HOPSWORKS_PROJECT_NAME }}
       run: |
-        python training.py
+        python scripts/training.py
     
     - name: Upload training results
       if: always()
@@ -52,10 +53,8 @@ jobs:
       if: failure()
       run: |
         echo "Training pipeline failed at $(date)"
-        # You can add Slack/email notifications here
     
     - name: Notify on success
       if: success()
       run: |
         echo "Training pipeline completed successfully at $(date)"
-        # You can add Slack/email notifications here

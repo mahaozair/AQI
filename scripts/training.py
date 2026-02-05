@@ -1,4 +1,5 @@
 
+from narwhals import Schema
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -6,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from config import TEST_SIZE
+from config import FEATURE_COLUMNS, TEST_SIZE
 from fetch_features import RANDOM_STATE, TARGET_COLUMN, connect_to_hopsworks, load_data_from_feature_store, prepare_features_and_target
 import xgboost as xgb
 import lightgbm as lgb
@@ -17,6 +18,7 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+
 
 def split_and_scale_data(X, y):
     """Split into train/test and scale features"""
@@ -211,31 +213,12 @@ def save_results(results, trained_models, scaler, feature_names, project):
     
     try:
         # Get model registry
+        # Get model registry
         mr = project.get_model_registry()
-        
-        # Create model directory with all artifacts
-        model_dir = "aqi_model_artifacts"
-        os.makedirs(model_dir, exist_ok=True)
-        
-        # Save all artifacts to model directory
-        joblib.dump(best_model, f"{model_dir}/model.joblib")
-        joblib.dump(scaler, f"{model_dir}/scaler.joblib")
-        with open(f"{model_dir}/feature_names.json", 'w') as f:
-            json.dump(feature_names, f, indent=2)
-        with open(f"{model_dir}/metrics.json", 'w') as f:
-            json.dump(best_metrics, f, indent=2)
-        
-        # Create input/output schema
-        input_schema = {
-            "features": feature_names,
-            "type": "float64"
-        }
-        output_schema = {
-            "prediction": TARGET_COLUMN,
-            "type": "float64"
-        }
-        
-        # Create model in registry
+
+        # Create model in registry with example input
+        input_example = {f: 0.0 for f in feature_names}  # all features with dummy float values
+
         aqi_model = mr.python.create_model(
             name="aqi_predictor",
             description=f"AQI Prediction model using {best_name} - Predicts PM2.5 24h ahead",
@@ -245,13 +228,19 @@ def save_results(results, trained_models, scaler, feature_names, project):
                 "r2": float(best_metrics['r2']),
                 "mape": float(best_metrics['mape'])
             },
-            model_schema={
-                "input_schema": input_schema,
-                "output_schema": output_schema
-            }
+            input_example=input_example
         )
-        
-        # Save the model with all artifacts
+
+        # Save model artifacts folder
+        model_dir = "aqi_model_artifacts"
+        os.makedirs(model_dir, exist_ok=True)
+
+        joblib.dump(best_model, f"{model_dir}/model.joblib")
+        joblib.dump(scaler, f"{model_dir}/scaler.joblib")
+        with open(f"{model_dir}/feature_names.json", "w") as f:
+            json.dump(feature_names, f, indent=2)
+
+        # Register the model in Hopsworks
         aqi_model.save(model_dir)
         
         print(f"\n🎉 MODEL REGISTERED TO HOPSWORKS!")

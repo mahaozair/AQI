@@ -34,9 +34,10 @@ jobs:
     
     - name: Run feature pipeline
       env:
-        HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT_NAME: ${{ secrets.HOPSWORKS_PROJECT_NAME }}
       run: |
-        python feature_pipeline.py
+        python scripts/feature_pipeline.py
     
     - name: Notify on failure
       if: failure()

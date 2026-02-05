@@ -1,17 +1,20 @@
-"""
-AQI Prediction Dashboard
-Real-time and forecasted Air Quality Index for Karachi
-"""
-
-import streamlit as st
+import os
+import sys
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import joblib
+
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)
+# Connect to Hopsworks
 import hopsworks
-from config import (
+import streamlit as st
+
+from scripts.config import (
     HOPSWORKS_API_KEY,
     HOPSWORKS_PROJECT_NAME,
     FEATURE_GROUP_NAME,
@@ -55,43 +58,70 @@ st.markdown("""
 
 @st.cache_resource
 def load_model_and_scaler():
-    """Load trained model and scaler from Hopsworks"""
+    """
+    Connect to Hopsworks, fetch model and scaler from Model Registry.
+    Only the model and scaler are cached, not the project object.
+    """
+    PROJECT_NAME = "aqi_10p"  # exact name from Hopsworks UI
+    API_KEY = "8cgk2mCWFrd6GmH8.22VoIwMicv1OJxhnXUY97JA8wgq22iK92fRfp0nn3dW9vVJSbms90AHv7pmq9A4R"  # Get from hopsworks.ai
+    
     try:
+        # Login fresh every time (do NOT cache project object)
         project = hopsworks.login(
-            project=HOPSWORKS_PROJECT_NAME,
-            api_key_value=HOPSWORKS_API_KEY
+            project=PROJECT_NAME,
+            api_key_value=API_KEY,
+            host="eu-west.cloud.hopsworks.ai",
+            port=443,
+            engine="python" 
         )
         
+        # Access model registry
         mr = project.get_model_registry()
         model_obj = mr.get_model("aqi_predictor", version=1)
+        
+        # Download model artifacts
         model_dir = model_obj.download()
         
+        # Load model and scaler
         model = joblib.load(f"{model_dir}/model.joblib")
         scaler = joblib.load(f"{model_dir}/scaler.joblib")
         
         return model, scaler, project
     except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None, None, None
-
+        st.error(f"❌ Error loading model or scaler: {e}")
+        st.stop()
 
 @st.cache_data(ttl=3600)
 def load_latest_features(_project):
-    """Load latest features from Feature Store"""
+    """Load latest features from Hopsworks and create a pseudo timestamp"""
     try:
         fs = _project.get_feature_store()
         fg = fs.get_feature_group(
             name=FEATURE_GROUP_NAME,
             version=FEATURE_GROUP_VERSION
         )
-        
+
+        # Read the feature group
         df = fg.read()
-        df = df.sort_values('event_time', ascending=False)
-        
+
+        # Check if timestamp exists
+        if 'event_time' not in df.columns:
+            # Create a pseudo timestamp from year/month/day/hour
+            # Using a default year if not available
+            df['year'] = 2026  # or your default year
+            df['event_time'] = pd.to_datetime(
+                df[['year', 'month', 'day', 'hour']]
+            )
+
+        # Sort by this pseudo timestamp
+        df = df.sort_values('event_time', ascending=False).reset_index(drop=True)
+
         return df
+
     except Exception as e:
         st.error(f"Error loading features: {e}")
         return None
+
 
 
 def get_aqi_category(pm25):
@@ -137,7 +167,7 @@ def main():
     
     # Load model and data
     with st.spinner("Loading model and data..."):
-        model, scaler, project = load_model_and_scaler()
+        model, scaler , project= load_model_and_scaler()
         
         if model is None or scaler is None or project is None:
             st.error("Failed to load model. Please check your configuration.")
@@ -184,63 +214,89 @@ def main():
     st.markdown("---")
     
     # Predictions
-    st.markdown("### 🔮 24-Hour Forecast")
-    
+    st.markdown("### 🔮 3-Day (72h) Forecast")
+
     # Prepare features for prediction
     features_available = [col for col in FEATURE_COLUMNS if col in df.columns]
-    
+
     try:
-        X = df[features_available].iloc[:24].values  # Last 24 hours
-        X_scaled = scaler.transform(X)
-        predictions = model.predict(X_scaled)
+        # We'll use the last row as base for prediction
+        base_features = df[features_available].iloc[0].copy()
+
+        # Create a dataframe for next 72 hours
+        forecast_rows = []
+        for i in range(1, 73):  # 72 hours
+            new_row = base_features.copy()
+            
+            # Increment hour/day/month accordingly
+            hour = (base_features['hour'] + i) % 24
+            day_increment = (base_features['hour'] + i) // 24
+            day = base_features['day'] + day_increment
+            month = base_features['month']  # assuming same month for simplicity
+            weekday = (base_features['weekday'] + day_increment) % 7
+
+            # Update time features
+            new_row['hour'] = hour
+            new_row['day'] = day
+            new_row['month'] = month
+            new_row['weekday'] = weekday
+
+            forecast_rows.append(new_row)
+
+        forecast_df = pd.DataFrame(forecast_rows)
         
-        # Create forecast dataframe
-        forecast_times = [latest['event_time'] + timedelta(hours=i) for i in range(24)]
-        forecast_df = pd.DataFrame({
-            'Time': forecast_times,
-            'Predicted PM2.5': predictions
-        })
+        # Scale features
+        X_forecast = scaler.transform(forecast_df[features_available])
         
+        # Predict
+        predictions = model.predict(X_forecast)
+
+        # Generate pseudo timestamps for plotting
+        last_time = df['event_time'].iloc[0]
+        forecast_times = [last_time + pd.Timedelta(hours=i) for i in range(1, 73)]
+
+        forecast_df['event_time'] = forecast_times
+        forecast_df['Predicted PM2.5'] = predictions
+
         # Plot forecast
         fig = go.Figure()
-        
-        # Add prediction line
         fig.add_trace(go.Scatter(
-            x=forecast_df['Time'],
+            x=forecast_df['event_time'],
             y=forecast_df['Predicted PM2.5'],
             mode='lines+markers',
             name='Predicted PM2.5',
             line=dict(color='#1f77b4', width=3),
             marker=dict(size=6)
         ))
-        
-        # Add AQI threshold lines
+
+        # AQI thresholds
         fig.add_hline(y=12, line_dash="dash", line_color="green", annotation_text="Good")
         fig.add_hline(y=35.4, line_dash="dash", line_color="yellow", annotation_text="Moderate")
         fig.add_hline(y=55.4, line_dash="dash", line_color="orange", annotation_text="Unhealthy for Sensitive")
         fig.add_hline(y=150.4, line_dash="dash", line_color="red", annotation_text="Unhealthy")
-        
+
         fig.update_layout(
-            title="24-Hour PM2.5 Forecast",
+            title="72-Hour PM2.5 Forecast",
             xaxis_title="Time",
             yaxis_title="PM2.5 (μg/m³)",
             hovermode='x unified',
-            height=400
+            height=450
         )
-        
+
         st.plotly_chart(fig, use_container_width=True)
-        
+
         # Forecast summary
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Average (24h)", f"{predictions.mean():.1f} μg/m³")
+            st.metric("Average (72h)", f"{predictions.mean():.1f} μg/m³")
         with col2:
-            st.metric("Maximum (24h)", f"{predictions.max():.1f} μg/m³")
+            st.metric("Maximum (72h)", f"{predictions.max():.1f} μg/m³")
         with col3:
-            st.metric("Minimum (24h)", f"{predictions.min():.1f} μg/m³")
-        
+            st.metric("Minimum (72h)", f"{predictions.min():.1f} μg/m³")
+
     except Exception as e:
         st.error(f"Error generating predictions: {e}")
+
     
     st.markdown("---")
     
@@ -295,7 +351,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: gray;'>
-    Built with ❤️ using Streamlit | Data from Open-Meteo API | Powered by Hopsworks
+    Built with using Streamlit | Data from Open-Meteo API | Powered by Hopsworks
     </div>
     """, unsafe_allow_html=True)
 

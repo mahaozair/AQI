@@ -1,8 +1,3 @@
-"""
-Configuration file for AQI Prediction System
-Store your API keys and configuration here
-"""
-
 # Hopsworks Configuration
 HOPSWORKS_API_KEY = "8cgk2mCWFrd6GmH8.22VoIwMicv1OJxhnXUY97JA8wgq22iK92fRfp0nn3dW9vVJSbms90AHv7pmq9A4R"  # Get from hopsworks.ai
 HOPSWORKS_PROJECT_NAME = "aqi_10p"
