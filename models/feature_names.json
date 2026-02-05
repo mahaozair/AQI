@@ -1,0 +1,13 @@
+[
+  "temperature_2m",
+  "relative_humidity_2m",
+  "windspeed_10m",
+  "pm2_5",
+  "pm10",
+  "pm25_change",
+  "temp_3h_avg",
+  "hour",
+  "day",
+  "month",
+  "weekday"
+]
