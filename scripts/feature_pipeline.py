@@ -183,11 +183,12 @@ def save_to_feature_store(df, project, mode='append'):
     df_to_save = df_to_save.dropna(subset=['pm25_next_hour'])
     print(f"Removed {initial_rows - len(df_to_save)} rows with NaN target")
     
-    # Convert datetime to timestamp for Hopsworks
-    df_to_save['event_time'] = pd.to_datetime(df_to_save['datetime'])
+    # Create 'time' and 'time_key' columns to match YOUR schema
+    df_to_save['time'] = df_to_save['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    df_to_save['time_key'] = df_to_save['datetime'].dt.strftime('%Y%m%d%H')
     
     # CRITICAL: Only keep features that exist in your existing Feature Group
-    # Based on your feature_names.json
+    # Based on your Hopsworks UI screenshot
     EXISTING_FEATURES = [
         'temperature_2m',
         'relative_humidity_2m',
@@ -201,7 +202,8 @@ def save_to_feature_store(df, project, mode='append'):
         'month',
         'weekday',
         'pm25_next_hour',  # target
-        'event_time'  # timestamp
+        'time',            # timestamp string
+        'time_key'         # primary key
     ]
     
     # Filter to only existing features
@@ -234,7 +236,7 @@ def save_to_feature_store(df, project, mode='append'):
         
         print(f"\n📊 Feature Store Statistics:")
         print(f"   Total features: {len(df_to_save.columns)}")
-        print(f"   Date range: {df_to_save['event_time'].min()} to {df_to_save['event_time'].max()}")
+        print(f"   Date range: {df_to_save['time'].min()} to {df_to_save['time'].max()}")
         
     except Exception as e:
         print(f"❌ Error saving to Feature Store: {e}")
