@@ -203,74 +203,51 @@ def connect_to_hopsworks():
 
 
 def save_to_feature_store(df, fs, feature_group_name, feature_group_version=1, mode='append'):
-    """
-    Save features to Hopsworks Feature Store (robust version, compatible with time_key primary key)
-    
-    Args:
-        df (pd.DataFrame): DataFrame containing features including 'time' column.
-        fs: Hopsworks Feature Store object (from project.get_feature_store())
-        feature_group_name (str): Name of the Feature Group.
-        feature_group_version (int): Version of the Feature Group.
-        mode (str): 'append' or 'overwrite'
-    """
     print("\n" + "="*70)
     print(f"SAVING TO FEATURE STORE ({mode.upper()})")
     print("="*70)
     
     df_to_save = df.copy()
-    
-    # -------------------------------
-    # 1️⃣ Create primary key 'time_key' as string
-    # -------------------------------
+
     if 'time' not in df_to_save.columns:
         raise ValueError("Input dataframe must contain a 'time' column")
     
-    df_to_save['time_key'] = df_to_save['time'].dt.strftime("%Y%m%d%H")
+    # Create primary key
+    df_to_save['time_key'] = df_to_save['time'].dt.strftime("%Y%m%d%H").astype(str)
+    
+    # Drop rows with NaN target
+    df_to_save = df_to_save.dropna(subset=['pm25_next_hour']).copy()
     
     # -------------------------------
-    # 2️⃣ Drop timestamp / event_time columns (Hopsworks doesn't accept)
+    # Get or create feature group
     # -------------------------------
-    for col in ['time', 'event_time']:
-        if col in df_to_save.columns:
-            df_to_save = df_to_save.drop(columns=[col])
+    fg = fs.get_or_create_feature_group(
+        name=feature_group_name,
+        version=feature_group_version,
+        description="Weather + AQI features for Karachi (hourly)",
+        primary_key=['time_key'],
+        online_enabled=True
+    )
     
+    # Keep only columns present in the FG (if it already has features)
+    try:
+        fg_columns = [f.name for f in fg.get_features()]
+        df_to_save = df_to_save[[c for c in df_to_save.columns if c in fg_columns]]
+    except Exception:
+        # If FG is new, save everything
+        pass
+
     # -------------------------------
-    # 3️⃣ Drop rows with NaN in target (if exists)
-    # -------------------------------
-    target_cols = [c for c in df_to_save.columns if c.endswith('_next_hour')]
-    for col in target_cols:
-        df_to_save = df_to_save.dropna(subset=[col])
-    
-    print(f"Prepared {len(df_to_save)} rows for Hopsworks Feature Store")
-    
-    # -------------------------------
-    # 4️⃣ Ensure columns order (time_key first)
-    # -------------------------------
-    columns_to_keep = ['time_key'] + [c for c in df_to_save.columns if c != 'time_key']
-    df_to_save = df_to_save[columns_to_keep]
-    
-    # -------------------------------
-    # 5️⃣ Get or create feature group
+    # Insert data
     # -------------------------------
     try:
-        fg = fs.get_or_create_feature_group(
-            name=feature_group_name,
-            version=feature_group_version,
-            description="Weather + AQI features for Karachi (hourly)",
-            primary_key=['time_key'],
-            online_enabled=True
-        )
-        
-        # -------------------------------
-        # 6️⃣ Insert data
-        # -------------------------------
-        fg.insert(df_to_save, write_options={"wait_for_job": True}, overwrite=(mode=='overwrite'))
+        fg.insert(df_to_save, overwrite=(mode=='overwrite'), write_options={"wait_for_job": True})
         action = "Overwrote" if mode=='overwrite' else "Appended"
         print(f"✅ {action} {len(df_to_save)} rows into feature group '{feature_group_name}'")
-    
     except Exception as e:
         print(f"❌ Error saving to Feature Store: {e}")
         raise
+
 
 
 
