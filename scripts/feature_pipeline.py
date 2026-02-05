@@ -303,6 +303,7 @@ def update_latest_data():
     
     # Connect to Hopsworks
     project = connect_to_hopsworks()
+    fs = project.get_feature_store()
     
     # Fetch data
     df = fetch_open_meteo_data(start_date, end_date)
@@ -310,8 +311,18 @@ def update_latest_data():
     # Compute features
     df = compute_features(df)
     
+    # Ensure 'time' column exists for feature store
+    if 'datetime' in df.columns:
+        df['time'] = df['datetime']
+    
     # Save to Feature Store (append mode for updates)
-    save_to_feature_store(df, project, mode='append')
+    save_to_feature_store(
+        df,
+        fs=fs,
+        feature_group_name=FEATURE_GROUP_NAME,
+        feature_group_version=FEATURE_GROUP_VERSION,
+        mode='append'
+    )
     
     print("\n" + "="*70)
     print("✅ UPDATE COMPLETED")
