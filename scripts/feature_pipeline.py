@@ -210,7 +210,7 @@ def save_to_feature_store(df, project, mode='append'):
     print("\n" + "="*70)
     print("SAVING TO FEATURE STORE")
     print("="*70)
-    
+
     fs = project.get_feature_store()
     
     # Prepare dataframe
@@ -220,30 +220,36 @@ def save_to_feature_store(df, project, mode='append'):
     initial_rows = len(df_to_save)
     df_to_save = df_to_save.dropna(subset=['pm25_next_hour'])
     print(f"Removed {initial_rows - len(df_to_save)} rows with NaN target")
-    
-    # Convert datetime to timestamp for Hopsworks
-    df_to_save['event_time'] = pd.to_datetime(df_to_save['datetime'])
+
+    # Create primary key column 'time_key' if it doesn't exist
+    if 'time_key' not in df_to_save.columns:
+        # Format as YYYYMMDDHH integer
+        df_to_save['time_key'] = df_to_save['datetime'].dt.strftime('%Y%m%d%H').astype(int)
+
+    # Keep event_time column for Hopsworks (optional, but recommended)
+    if 'event_time' not in df_to_save.columns:
+        df_to_save['event_time'] = pd.to_datetime(df_to_save['datetime'])
+
+    # Drop original datetime column
     df_to_save = df_to_save.drop('datetime', axis=1)
-    
+
     print(f"Saving {len(df_to_save)} rows to Feature Store...")
     print(f"Feature Group: {FEATURE_GROUP_NAME}")
-    
-    try:
-        fs = project.get_feature_store()
 
+    try:
         # Get or create feature group
         fg = fs.get_or_create_feature_group(
             name=FEATURE_GROUP_NAME,
             version=FEATURE_GROUP_VERSION,
             description="Weather and Air Quality features for AQI prediction in Karachi",
             primary_key=['time_key'],
-            event_time=None,  # No event_time column since we use time_key
+            event_time='event_time',  # required for Hopsworks
             online_enabled=False
         )
 
         # Insert data
-        fg.insert(df_to_save, overwrite=(mode=='overwrite'))
-        action = "Overwrote" if mode=='overwrite' else "Appended"
+        fg.insert(df_to_save, overwrite=(mode == 'overwrite'))
+        action = "Overwrote" if mode == 'overwrite' else "Appended"
         print(f"✅ {action} feature group with {len(df_to_save)} rows")
 
         # Log stats
@@ -254,6 +260,7 @@ def save_to_feature_store(df, project, mode='append'):
     except Exception as e:
         print(f"❌ Error saving to Feature Store: {e}")
         raise
+
 
 
 def backfill_historical_data():
