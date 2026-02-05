@@ -229,28 +229,28 @@ def save_to_feature_store(df, project, mode='append'):
     print(f"Feature Group: {FEATURE_GROUP_NAME}")
     
     try:
+        fs = project.get_feature_store()
+
         # Get or create feature group
         fg = fs.get_or_create_feature_group(
             name=FEATURE_GROUP_NAME,
             version=FEATURE_GROUP_VERSION,
             description="Weather and Air Quality features for AQI prediction in Karachi",
-            primary_key=['event_time'],
-            event_time='event_time',
+            primary_key=['time_key'],
+            event_time=None,  # No event_time column since we use time_key
             online_enabled=False
         )
-        
+
         # Insert data
-        if mode == 'overwrite':
-            fg.insert(df_to_save, overwrite=True)
-            print(f"✅ Overwrote feature group with {len(df_to_save)} rows")
-        else:
-            fg.insert(df_to_save, overwrite=False)
-            print(f"✅ Appended {len(df_to_save)} rows to feature group")
-        
-        print(f"\n📊 Feature Store Statistics:")
+        fg.insert(df_to_save, overwrite=(mode=='overwrite'))
+        action = "Overwrote" if mode=='overwrite' else "Appended"
+        print(f"✅ {action} feature group with {len(df_to_save)} rows")
+
+        # Log stats
+        print("\n📊 Feature Store Statistics:")
         print(f"   Total features: {len(df_to_save.columns)}")
-        print(f"   Date range: {df_to_save['event_time'].min()} to {df_to_save['event_time'].max()}")
-        
+        print(f"   Time key range: {df_to_save['time_key'].min()} to {df_to_save['time_key'].max()}")
+
     except Exception as e:
         print(f"❌ Error saving to Feature Store: {e}")
         raise
