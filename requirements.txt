@@ -53,9 +53,9 @@ requests==2.32.4
 urllib3==2.5.0
 
 # Model Interpretability
-shap==0.50.0
+shap==0.43.0
 slicer==0.0.8
-numba==0.63.1
+numba>=0.54  # compatible with SHAP 0.43
 cloudpickle==3.1.2
 
 # Visualization
